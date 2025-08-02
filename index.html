@@ -1,0 +1,142 @@
+<!-- Your existing HTML structure remains unchanged above -->
+<!-- Add overlay toggle checkboxes -->
+<div style="position:absolute; top:10px; left:10px; z-index:1000; background:white; padding:6px; border-radius:4px;">
+  <label><input type="checkbox" id="toggleTriangle" checked> Show Triangle</label><br>
+  <label><input type="checkbox" id="toggleLabels" checked> Show Labels</label><br>
+  <label><input type="checkbox" id="toggleArcs" checked> Show Arcs</label><br>
+  <label><input type="checkbox" id="toggleCalc" checked> Show Sight Reduction</label>
+</div>
+
+<!-- We're adding this script below to complete the rendering logic -->
+<script>
+  function degToRad(deg) { return (deg * Math.PI) / 180; }
+  function radToDeg(rad) { return (rad * 180) / Math.PI; }
+
+  function latLonToVector3(lat, lon) {
+    const phi = degToRad(90 - lat);
+    const theta = degToRad(lon);
+    const x = Math.sin(phi) * Math.cos(theta);
+    const y = Math.cos(phi);
+    const z = Math.sin(phi) * Math.sin(theta);
+    return new THREE.Vector3(x, y, z);
+  }
+
+  function createPoint(position, color = 0xff0000, size = 0.02) {
+    const geometry = new THREE.SphereGeometry(size, 32, 32);
+    const material = new THREE.MeshBasicMaterial({ color });
+    const point = new THREE.Mesh(geometry, material);
+    point.position.copy(position);
+    return point;
+  }
+
+  function createArc(start, end, color = 0x00ffff) {
+    const points = [];
+    for (let i = 0; i <= 64; i++) {
+      const t = i / 64;
+      const v = new THREE.Vector3().copy(start).lerp(end, t).normalize();
+      points.push(v);
+    }
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({ color });
+    return new THREE.Line(geometry, material);
+  }
+
+  function createLabel(text, position) {
+    const div = document.createElement('div');
+    div.className = 'label';
+    div.textContent = text;
+    div.style.position = 'absolute';
+    div.style.color = 'black';
+    div.style.fontSize = '12px';
+    div.style.pointerEvents = 'none';
+    div.dataset.position = JSON.stringify(position);
+    document.body.appendChild(div);
+    return div;
+  }
+
+  const labels = [];
+  function updateLabels(camera, renderer) {
+    const showLabels = document.getElementById('toggleLabels').checked;
+    labels.forEach(label => {
+      label.style.display = showLabels ? 'block' : 'none';
+      const pos = JSON.parse(label.dataset.position);
+      const vector = new THREE.Vector3(pos.x, pos.y, pos.z);
+      vector.project(camera);
+      const x = (vector.x * 0.5 + 0.5) * renderer.domElement.clientWidth;
+      const y = (-vector.y * 0.5 + 0.5) * renderer.domElement.clientHeight;
+      label.style.transform = `translate(-50%, -50%) translate(${x}px,${y}px)`;
+    });
+  }
+
+  let triangleGroup;
+  function drawPZX(lat, lon, dec, gha) {
+    if (triangleGroup) scene.remove(triangleGroup);
+    labels.forEach(l => l.remove());
+    labels.length = 0;
+
+    triangleGroup = new THREE.Group();
+    triangleGroup.name = 'pzxGroup';
+
+    const Z = latLonToVector3(lat, lon);
+    const Zmesh = createPoint(Z, 0x00ff00);
+    triangleGroup.add(Zmesh);
+    labels.push(createLabel('Z', Z));
+
+    const X = latLonToVector3(dec, 360 - gha);
+    const Xmesh = createPoint(X, 0x0000ff);
+    triangleGroup.add(Xmesh);
+    labels.push(createLabel('X', X));
+
+    const P = new THREE.Vector3(0, 1, 0);
+    const Pmesh = createPoint(P, 0xff0000);
+    triangleGroup.add(Pmesh);
+    labels.push(createLabel('P', P));
+
+    if (document.getElementById('toggleTriangle').checked) {
+      triangleGroup.add(createLine(P, Z));
+      triangleGroup.add(createLine(Z, X));
+      triangleGroup.add(createLine(P, X));
+    }
+    if (document.getElementById('toggleArcs').checked) {
+      triangleGroup.add(createArc(P, Z));
+      triangleGroup.add(createArc(Z, X));
+      triangleGroup.add(createArc(P, X));
+    }
+
+    scene.add(triangleGroup);
+
+    if (document.getElementById('toggleCalc').checked) {
+      const LHA = (gha - lon + 360) % 360;
+      const Hc = radToDeg(Math.asin(Math.sin(degToRad(lat)) * Math.sin(degToRad(dec)) + Math.cos(degToRad(lat)) * Math.cos(degToRad(dec)) * Math.cos(degToRad(LHA))));
+      const Zn = radToDeg(Math.atan2(Math.sin(degToRad(LHA)), Math.cos(degToRad(lat)) * Math.tan(degToRad(dec)) - Math.sin(degToRad(lat)) * Math.cos(degToRad(LHA))));
+      const Zn360 = (Zn + 360) % 360;
+      const info = `LHA: ${LHA.toFixed(2)}°, Hc: ${Hc.toFixed(2)}°, Zn: ${Zn360.toFixed(2)}°`;
+      document.getElementById('infoBox').innerText = info;
+    } else {
+      document.getElementById('infoBox').innerText = '';
+    }
+  }
+
+  function updateFromForm() {
+    const lat = parseFloat(document.getElementById('latitude').value);
+    const lon = parseFloat(document.getElementById('longitude').value);
+    const dec = parseFloat(document.getElementById('declination').value);
+    const gha = parseFloat(document.getElementById('gha').value);
+    drawPZX(lat, lon, dec, gha);
+  }
+
+  ['latitude', 'longitude', 'declination', 'gha', 'toggleTriangle', 'toggleLabels', 'toggleArcs', 'toggleCalc']
+    .forEach(id => document.getElementById(id).addEventListener('input', updateFromForm));
+
+  updateFromForm();
+
+  animate = () => {
+    requestAnimationFrame(animate);
+    globe.rotation.y += 0.001;
+    updateLabels(camera, renderer);
+    renderer.render(scene, camera);
+  };
+  animate();
+</script>
+</body>
+</html>
